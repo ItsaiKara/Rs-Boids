@@ -24,7 +24,15 @@ const BOID_SIZE: f64 = 10.0;
 const MAX_BOID_SPEED: f64 = 10.0;
 const NB_BOIDS: i32 = 100;
 
+/**
+ * The size of the flock (the radius around the boid in which other boids are considered neighbors)
+ */
 const FLOCK_SIZE: f64 = 100.;
+
+/**
+ * The distance at which the boid will start to avoid colliding with other boids
+ */
+const SEPARATION_RADIUS: f64 = 50.0;
 
 const FRAME_RATE: u64 = 24;
 const VELCIRAPTOR_SPEED: f64 = 100.;
@@ -106,6 +114,7 @@ struct Boid {
     alignment: [f64; 2],
     cohesion: [f64; 2],
     com: [f64; 2],
+    steer_away: [f64; 2],
 }
 
 impl Boid {
@@ -123,7 +132,11 @@ impl Boid {
             separation: [0.0, 0.0],
             alignment: [0.0, 0.0],
             cohesion: [0.0, 0.0],
+            //Center Of Mass
             com: [0.0, 0.0],
+            //Point to steer away from
+            steer_away: [0.0, 0.0],
+
         }
     }
 
@@ -136,10 +149,11 @@ impl Boid {
 
         self.avoid_edges();
         
-        self.com = self.get_center_of_mass(boids);
-        // println!("size: {}", boids.len());
+        // self.com  = self.get_center_of_mass(boids);
+        // self.steer_away = self.get_steer_away(boids);
 
-        //print la taille de la liste
+        self.com = self.build_rule_vectors(boids.clone(), "cohesion".to_string(), FLOCK_SIZE);
+        self.steer_away = self.build_rule_vectors(boids.clone(), "separation".to_string(), SEPARATION_RADIUS);
         
         // self.update_separation();
         self.update_cohesion();
@@ -147,12 +161,14 @@ impl Boid {
         //update the boid's velocity based on the cohesion vector
         self.velocity[0] += self.cohesion[0];
         self.velocity[1] += self.cohesion[1];
-        
-        // println!("velocity: {:?}, cohesion: {:?}", self.velocity, self.cohesion);
 
+        self.update_separation();
+
+        self.velocity[0] -= self.separation[0];
+        self.velocity[1] -= self.separation[1];
+        
         self.enforce_max_speed();
-        
-
+    
         // update boid's position
         self.x += self.velocity[0];
         self.y += self.velocity[1];
@@ -166,28 +182,51 @@ impl Boid {
      * @param app : the application
      * @return the center of mass of the flock 
      */
-    fn get_center_of_mass(&self, boids : LinkedList<Boid>) -> [f64; 2] {
-        let mut center_of_mass = [0.0, 0.0];
+    // fn get_center_of_mass(&self, boids : LinkedList<Boid>) -> [f64; 2] {
+    //     let mut center_of_mass = [0.0, 0.0];
+    //     let mut nb_neighbors = 0;
+    //     // if nb_neighbors == 0 {
+    //     //     return center_of_mass;
+    //     // }
+    //     for boid in boids {
+    //         if boid.id == self.id {
+    //             continue;
+    //         }
+    //         if (boid.x - self.x).powi(2) + (boid.y - self.y).powi(2) < FLOCK_SIZE.powi(2) as f64 {
+    //             center_of_mass[0] += boid.x;
+    //             center_of_mass[1] += boid.y;
+    //             nb_neighbors += 1;
+    //         }
+    //     }
+    //     if nb_neighbors > 0 {
+    //         center_of_mass[0] /= nb_neighbors as f64;
+    //         center_of_mass[1] /= nb_neighbors as f64;
+    //     }
+    //     center_of_mass
+    // }
+
+    fn build_rule_vectors(&self, boids : LinkedList<Boid>, radius_name: String , radius: f64) -> [f64; 2] {
+        let mut rule_vector = [0.0, 0.0];
         let mut nb_neighbors = 0;
-        // if nb_neighbors == 0 {
-        //     return center_of_mass;
-        // }
-        for boid in boids {
-            if boid.id == self.id {
-                continue;
+        if radius_name == "separation" || radius_name == "cohesion"  {
+            for boid in boids {
+                if boid.id == self.id {
+                    continue;
+                }
+                if (boid.x - self.x).powi(2) + (boid.y - self.y).powi(2) < radius.powi(2) as f64 {
+                    rule_vector[0] += boid.x;
+                    rule_vector[1] += boid.y;
+                    nb_neighbors += 1;
+                }
             }
-            if (boid.x - self.x).powi(2) + (boid.y - self.y).powi(2) < FLOCK_SIZE.powi(2) as f64 {
-                center_of_mass[0] += boid.x;
-                center_of_mass[1] += boid.y;
-                nb_neighbors += 1;
+            if nb_neighbors > 0 {
+                rule_vector[0] /= nb_neighbors as f64;
+                rule_vector[1] /= nb_neighbors as f64;
             }
         }
-        if nb_neighbors > 0 {
-            center_of_mass[0] /= nb_neighbors as f64;
-            center_of_mass[1] /= nb_neighbors as f64;
-        }
-        center_of_mass
+        rule_vector
     }
+
 
     /**
      * Change the cohesion vector to point towards the center of mass of the flock
@@ -203,7 +242,13 @@ impl Boid {
     }
 
     fn update_separation(&mut self) {
-        //TODO
+        self.separation[0] = self.steer_away[0] - self.x;
+        self.separation[1] = self.steer_away[1] - self.y;
+        //normalize the cohesion vector
+        let norm = (self.separation[0].powi(2) + self.separation[1].powi(2)).sqrt();
+        self.separation[0] /= norm;
+        self.separation[1] /= norm;
+
     }
 
 
@@ -312,6 +357,18 @@ impl Boid {
             circle.draw([center[0], center[1], radius, radius], &c.draw_state, transform, gl);
         });
 
+        //draw the radius of the separation around the boid
+        gl.draw(args.viewport(), |c, gl| {
+            use graphics::ellipse;
+            let transform = c.transform;
+            let red = [1.0, 0.0, 0.0, 0.3];
+            let circle = ellipse::Ellipse::new(red);
+            let center = [self.x - SEPARATION_RADIUS/2., self.y- SEPARATION_RADIUS/2.];
+            let radius = SEPARATION_RADIUS;
+            //ofset the radius to make the circle fit the boid's position
+            circle.draw([center[0], center[1], radius, radius], &c.draw_state, transform, gl);
+        });
+
         gl.draw(args.viewport(), |c, gl| {
             let transform = c.transform.trans(self.x, self.y);
             let white = [1.0, 1.0, 1.0, 1.0];
@@ -345,6 +402,15 @@ impl Boid {
             let blue = [0.0, 0.0, 1.0, 1.0];
             let square = rectangle::Rectangle::new(blue);
             let center = rectangle::centered_square(self.com[0], self.com[1], 5.0);
+            square.draw(center, &c.draw_state, transform, gl);
+        });
+
+        //draw a green square on each boid.steer_away
+        gl.draw(args.viewport(), |c, gl| {
+            let transform = c.transform;
+            let green = [0.0, 1.0, 0.0, 1.0];
+            let square = rectangle::Rectangle::new(green);
+            let center = rectangle::centered_square(self.steer_away[0], self.steer_away[1], 5.0);
             square.draw(center, &c.draw_state, transform, gl);
         });
 
