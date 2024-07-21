@@ -24,43 +24,18 @@ const BOID_SIZE: f64 = 10.0;
 const MAX_BOID_SPEED: f64 = 10.0;
 const NB_BOIDS: i32 = 100;
 
+const FLOCK_SIZE: f64 = 100.;
+
 const FRAME_RATE: u64 = 24;
 const VELCIRAPTOR_SPEED: f64 = 100.;
 
 
 const EDGE_DETECTION_DISTANCE: f64 = 50.0;
 
-struct Marker {
-    x: f64,
-    y: f64,
-}
-
-impl Marker {
-    fn new(x: f64, y: f64) -> Marker {
-        Marker {
-            x: x,
-            y: y,
-        }
-    }
-
-    fn render(&self, gl: &mut GlGraphics, args: &RenderArgs) {
-        use graphics::*;
-
-        gl.draw(args.viewport(), |c, gl| {
-            let transform = c.transform;
-            let red = [1.0, 0.0, 0.0, 0.5];
-            let square = rectangle::centered_square(self.x, self.y, 10.0);
-            rectangle(red, square, transform, gl);
-        });
-    }
-
-}
-
 
 struct App {
     gl: GlGraphics,
     boids: LinkedList<Boid>,
-    markers: LinkedList<Marker>,
 }
 
 impl App {
@@ -96,17 +71,14 @@ impl App {
         for boid in &self.boids {
             boid.render(&mut self.gl, args);
         }
-
-        //render the markers
-        for marker in &self.markers {
-            marker.render(&mut self.gl, args);
-        }
     }
 
     fn update(&mut self, _args: &UpdateArgs) {
-        //update and render each boid
+        // C'est dégeulasse mais je ne sais pas comment faire autrement
+        let dup_boids = self.boids.clone();
+        
         for boid in &mut self.boids {
-            boid.update(_args);
+            boid.update(_args, dup_boids.clone());
         }
     }
 
@@ -118,7 +90,10 @@ impl App {
     }
 }
 
+
+#[derive(Clone, Copy)] 
 struct Boid {
+    id : i32,
     x: f64,
     y: f64,
     dx: f64,
@@ -130,11 +105,13 @@ struct Boid {
     separation: [f64; 2],
     alignment: [f64; 2],
     cohesion: [f64; 2],
+    com: [f64; 2],
 }
 
 impl Boid {
-    fn new(x: f64, y: f64, angle : f64) -> Boid { 
+    fn new(i : i32 , x: f64, y: f64, angle : f64) -> Boid { 
         Boid {
+            id : i ,
             x: x,
             y: y,
             dx: 0.0,
@@ -146,31 +123,89 @@ impl Boid {
             separation: [0.0, 0.0],
             alignment: [0.0, 0.0],
             cohesion: [0.0, 0.0],
+            com: [0.0, 0.0],
         }
     }
 
     /**
      * Update the boid's position at each frame
      */
-    fn update(&mut self, _args: &UpdateArgs) {
+    fn update(&mut self, _args: &UpdateArgs, boids : LinkedList<Boid>) {
         //update the boid's position
         self.update_distance_from_edges();
 
         self.avoid_edges();
+        
+        self.com = self.get_center_of_mass(boids);
+        // println!("size: {}", boids.len());
+
+        //print la taille de la liste
+        
+        // self.update_separation();
+        self.update_cohesion();
+        
+        //update the boid's velocity based on the cohesion vector
+        self.velocity[0] += self.cohesion[0];
+        self.velocity[1] += self.cohesion[1];
+        
+        // println!("velocity: {:?}, cohesion: {:?}", self.velocity, self.cohesion);
+
         self.enforce_max_speed();
         
+
         // update boid's position
         self.x += self.velocity[0];
         self.y += self.velocity[1];
         //update the boid's angle
         self.angle = self.velocity[1].atan2(self.velocity[0]);
 
-    }    
+    }   
 
+    /**
+     * Get the center of mass of the flock
+     * @param app : the application
+     * @return the center of mass of the flock 
+     */
+    fn get_center_of_mass(&self, boids : LinkedList<Boid>) -> [f64; 2] {
+        let mut center_of_mass = [0.0, 0.0];
+        let mut nb_neighbors = 0;
+        // if nb_neighbors == 0 {
+        //     return center_of_mass;
+        // }
+        for boid in boids {
+            if boid.id == self.id {
+                continue;
+            }
+            if (boid.x - self.x).powi(2) + (boid.y - self.y).powi(2) < FLOCK_SIZE.powi(2) as f64 {
+                center_of_mass[0] += boid.x;
+                center_of_mass[1] += boid.y;
+                nb_neighbors += 1;
+            }
+        }
+        if nb_neighbors > 0 {
+            center_of_mass[0] /= nb_neighbors as f64;
+            center_of_mass[1] /= nb_neighbors as f64;
+        }
+        center_of_mass
+    }
+
+    /**
+     * Change the cohesion vector to point towards the center of mass of the flock
+     */
+    fn update_cohesion(&mut self) {
+        //Update the cohesion vector to point towards the center of mass of the flock
+        self.cohesion[0] = self.com[0] - self.x;
+        self.cohesion[1] = self.com[1] - self.y;
+        //normalize the cohesion vector
+        let norm = (self.cohesion[0].powi(2) + self.cohesion[1].powi(2)).sqrt();
+        self.cohesion[0] /= norm;
+        self.cohesion[1] /= norm;    
+    }
 
     fn update_separation(&mut self) {
         //TODO
     }
+
 
     /**
      * Ensure that the boid's speed does not exceed the maximum speed
@@ -263,7 +298,19 @@ impl Boid {
 
 
     fn render(&self, gl: &mut GlGraphics, args: &RenderArgs) {
-        use graphics::*;
+        use graphics::*; 
+
+        //draw the radius of the flock around the boid
+        gl.draw(args.viewport(), |c, gl| {
+            use graphics::ellipse;
+            let transform = c.transform;
+            let pink = [0.5, 0.0, 0.5, 0.3];
+            let circle = ellipse::Ellipse::new(pink);
+            let center = [self.x - FLOCK_SIZE/2., self.y- FLOCK_SIZE/2.];
+            let radius = FLOCK_SIZE;
+            //ofset the radius to make the circle fit the boid's position
+            circle.draw([center[0], center[1], radius, radius], &c.draw_state, transform, gl);
+        });
 
         gl.draw(args.viewport(), |c, gl| {
             let transform = c.transform.trans(self.x, self.y);
@@ -291,6 +338,18 @@ impl Boid {
             rectangle(color::RED, center, transform, gl);
             
         });
+
+        //draw a blue square on each boid.com
+        gl.draw(args.viewport(), |c, gl| {
+            let transform = c.transform;
+            let blue = [0.0, 0.0, 1.0, 1.0];
+            let square = rectangle::Rectangle::new(blue);
+            let center = rectangle::centered_square(self.com[0], self.com[1], 5.0);
+            square.draw(center, &c.draw_state, transform, gl);
+        });
+
+        
+
     }   
 
 }
@@ -311,16 +370,15 @@ fn main() {
     let mut app = App {
         gl: GlGraphics::new(opengl),
         boids: LinkedList::new(),
-        markers: LinkedList::new(),
     };
 
-    for _ in 0..NB_BOIDS {
+    for sex in 0..NB_BOIDS {
         let mut rng = rand::thread_rng();
         let x = rng.gen_range(0..WIDTH as i32);
         let y = rng.gen_range(0..HEIGHT as i32);
         let angle : f64 = rng.gen_range(0.0..2.0 * std::f64::consts::PI); 
 
-        app.boids.push_back(Boid::new(x as f64, y as f64, angle));
+        app.boids.push_back(Boid::new(sex, x as f64, y as f64, angle));
     }
 
     let mut events = Events::new(EventSettings::new()).ups(FRAME_RATE);
