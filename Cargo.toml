@@ -1,0 +1,12 @@
+[package]
+name = "Rs-Boids"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+piston = "1.0.0"
+piston2d-graphics = "0.44.0"
+pistoncore-glutin_window = "0.72.0"
+piston2d-opengl_graphics = "0.85.1"
+rand = "0.8.5"
+include_dir = "0.7.2"
