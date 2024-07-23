@@ -19,7 +19,7 @@ const HEIGHT: f64 = 800.0;
 const STEERING_FACTOR: f64 = 5.;
 
 const BOID_SIZE: f64 = 10.0;
-const MAX_BOID_SPEED: f64 = 7.0;
+const MAX_BOID_SPEED: f64 = 10.0;
 const NB_BOIDS: i32 = 100;
 
 
@@ -33,7 +33,7 @@ const WEIGHT_COHESION: f64 = 0.3;
  * The distance at which the boid will start to avoid colliding with other boids
  */
 const SEPARATION_RADIUS: f64 = 20.0;
-const WEIGHT_SEPARATION: f64 = 0.5;
+const WEIGHT_SEPARATION: f64 = 0.9;
 
 /**
  * The distance at which the boid will start to align with other boids
@@ -44,7 +44,7 @@ const WEIGHT_ALIGNMENT: f64 = 0.7;
 const FRAME_RATE: u64 = 24;
 const VELCIRAPTOR_SPEED: f64 = 50.;
 
-const MAX_OMEGA : f64 = 0.5;
+const MAX_OMEGA : f64 = 0.0;
 
 const EDGE_DETECTION_DISTANCE: f64 = 50.0;
 
@@ -55,6 +55,20 @@ struct App {
     boids: LinkedList<Boid>,
     glyph_cache: GlyphCache<'static>,
     debug : bool,
+    weight_cohesion : f64,
+    weight_separation : f64,
+    weight_alignment : f64,
+
+    radius_cohesion : f64,
+    radius_separation : f64,
+    radius_alignment : f64,
+
+    // 0 : cohesion
+    // 1 : separation
+    // 2 : alignment
+    // True if edit weight mode is active
+    // False if edit radius mode is active
+    modes : [bool; 3]
 }
 
 impl App {
@@ -88,13 +102,29 @@ impl App {
 
         //render each boid
         for boid in &self.boids {
-            boid.render(&mut self.gl, args, debug);
+
+            let sim_args = [self.weight_cohesion, self.weight_separation, self.weight_alignment, self.radius_cohesion, self.radius_separation, self.radius_alignment];
+            boid.render(&mut self.gl, args, debug, sim_args, self.modes);
         }
 
         self.gl.draw(args.viewport(), |c, gl| {
             let transform = c.transform.trans(10., 10.);
             let mut text = graphics::Text::new_color([1., 1.0, 1.0 ,1.], 11);
-            let str = format!("Cohesion Weight :{} | Separation Weight :{} | Alignment Weight :{}  ", WEIGHT_COHESION, WEIGHT_SEPARATION, WEIGHT_ALIGNMENT);
+            let str = format!("Cohesion Weight :{} | Separation Weight :{} | Alignment Weight :{}  ", self.weight_cohesion, self.weight_separation, self.weight_alignment);
+
+            text.draw(
+                &str,
+                &mut self.glyph_cache,
+                &c.draw_state,
+                transform,
+                gl,
+            ).unwrap();
+        });
+
+        self.gl.draw(args.viewport(), |c, gl| {
+            let transform = c.transform.trans(10., 50.);
+            let mut text = graphics::Text::new_color([1., 1.0, 1.0 ,1.], 11);
+            let str = format!("Cohesion Radius :{} | Separation Radius :{} | Alignment Radius :{}  ", self.radius_cohesion, self.radius_separation, self.radius_alignment);
 
             text.draw(
                 &str,
@@ -111,8 +141,11 @@ impl App {
         // C'est dégeulasse mais je ne sais pas comment faire autrement
         let dup_boids = self.boids.clone();
         
+        // args for simulation update
+        let sim_args = [self.weight_cohesion, self.weight_separation, self.weight_alignment, self.radius_cohesion, self.radius_separation, self.radius_alignment];
+
         for boid in &mut self.boids {
-            boid.update(_args, dup_boids.clone());
+            boid.update(_args, dup_boids.clone(), sim_args, self.modes);
         }
     }
 
@@ -142,6 +175,84 @@ impl App {
     fn init (&mut self) {
         self.load_boids();
     }
+
+    fn print(&self) {
+        println!("weight_cohesion : {}", self.weight_cohesion);
+        println!("weight_separation : {}", self.weight_separation);
+        println!("weight_alignment : {}", self.weight_alignment);
+        println!("radius_cohesion : {}", self.radius_cohesion);
+        println!("radius_separation : {}", self.radius_separation);
+        println!("radius_alignment : {}", self.radius_alignment);
+    }
+
+    fn increase_value(&mut self, str : String, value : f64) {
+        match str.as_str() {
+            "cohesion" => {
+                if self.modes[0] == true {
+                    self.weight_cohesion += value;
+                } else {
+                    self.radius_cohesion += value*10.;
+                }
+            },
+            "separation" => {
+                if self.modes[1] == true {
+                    self.weight_separation += value;
+                } else {
+                    self.radius_separation += value*10.;
+                }
+            },
+            "alignment" => {
+                if self.modes[2] == true {
+                    self.weight_alignment += value;
+                } else {
+                    self.radius_alignment += value*10.;
+                }
+            },
+            _ => (),
+        }
+    }
+
+    fn decrease_value(&mut self, str : String, value : f64) {
+        match str.as_str() {
+            "cohesion" => {
+                if self.modes[0] == true {
+                    self.weight_cohesion -= value;
+                } else {
+                    self.radius_cohesion -= value*10.;
+                }
+            },
+            "separation" => {
+                if self.modes[1] == true {
+                    self.weight_separation -= value;
+                } else {
+                    self.radius_separation -= value*10.;
+                }
+            },
+            "alignment" => {
+                if self.modes[2] == true {
+                    self.weight_alignment -= value;
+                } else {
+                    self.radius_alignment -= value*10.;
+                }
+            },
+            _ => (),
+        }
+    }
+
+    fn toggle_mode(&mut self, str : String) {
+        match str.as_str() {
+            "cohesion" => {
+                self.modes[0] = !self.modes[0];
+            },
+            "separation" => {
+                self.modes[1] = !self.modes[1];
+            },
+            "alignment" => {
+                self.modes[2] = !self.modes[2];
+            },
+            _ => (),
+        }
+    }
 }
 
 
@@ -162,6 +273,9 @@ struct Boid {
     com: [f64; 2],
     steer_away: [f64; 2],
     alignement_vector: [f64; 2],
+
+    previous_angle: f64,
+    unchanged_angle: i32,
 }
 
 impl Boid {
@@ -185,27 +299,39 @@ impl Boid {
             steer_away: [0.0, 0.0],
             //Vector to align with
             alignement_vector: [0.0, 0.0],
+
+            previous_angle: 0.0,
+            unchanged_angle: 0,
         }
     }
 
     /**
      * Update the boid's position at each frame
      */
-    fn update(&mut self, _args: &UpdateArgs, boids : LinkedList<Boid>) {
+    fn update(&mut self, _args: &UpdateArgs, boids : LinkedList<Boid>, sim_args : [f64; 6], modes : [bool; 3]) {
         //update the boid's position
         self.update_distance_from_edges();
+        self.wrap_around();
+
+        let weight_cohesion = sim_args[0];
+        let weight_separation = sim_args[1];
+        let weight_alignment = sim_args[2];
+
+        let flock_size = sim_args[3];
+        let separation_radius = sim_args[4];    
+        let alignment_radius = sim_args[5];
 
         
         // self.com  = self.get_center_of_mass(boids);
         // self.steer_away = self.get_steer_away(boids);
         
-        self.com = self.build_rule_vectors(boids.clone(), "cohesion".to_string(), FLOCK_SIZE);
-        self.steer_away = self.build_rule_vectors(boids.clone(), "separation".to_string(), SEPARATION_RADIUS);
-        self.alignement_vector = self.build_rule_vectors(boids.clone(), "alignment".to_string(), ALIGNMENT_RADIUS);
+        self.com = self.build_rule_vectors(boids.clone(), "cohesion".to_string(), flock_size);
+        self.steer_away = self.build_rule_vectors(boids.clone(), "separation".to_string(), separation_radius);
+        self.alignement_vector = self.build_rule_vectors(boids.clone(), "alignment".to_string(), alignment_radius);
         
-        let nb_neighbors_cohesion = self.get_nb_neighbors(boids.clone(), FLOCK_SIZE);
-        let nb_neighbors_separation = self.get_nb_neighbors(boids.clone(), SEPARATION_RADIUS);
-        let nb_neighbors_alignement = self.get_nb_neighbors(boids.clone(), ALIGNMENT_RADIUS);
+        let nb_neighbors_cohesion = self.get_nb_neighbors(boids.clone(), flock_size);
+        let nb_neighbors_separation = self.get_nb_neighbors(boids.clone(), separation_radius);
+        let nb_neighbors_alignement = self.get_nb_neighbors(boids.clone(), alignment_radius);
 
         if nb_neighbors_cohesion > 1 {
             self.update_cohesion();
@@ -226,38 +352,55 @@ impl Boid {
         }
         
         //update the boid's velocity based on the cohesion vector
-        self.velocity[0] += self.cohesion[0] * WEIGHT_COHESION;
-        self.velocity[1] += self.cohesion[1] * WEIGHT_COHESION;
+        // self.velocity[0] += self.cohesion[0] * WEIGHT_COHESION;
+        // self.velocity[1] += self.cohesion[1] * WEIGHT_COHESION;
+
+        self.velocity[0] += self.cohesion[0] * weight_cohesion;
         
         // self.update_separation();
         
-        self.velocity[0] -= self.separation[0] * WEIGHT_SEPARATION;
-        self.velocity[1] -= self.separation[1] * WEIGHT_SEPARATION;
+        self.velocity[0] -= self.separation[0] * weight_separation;
+        self.velocity[1] -= self.separation[1] * weight_alignment;
         
 
 
-        // let mut omega_cohesion = self.smooth_angle() * WEIGHT_COHESION;
+        let mut omega_cohesion = self.smooth_angle(self.cohesion) * weight_cohesion;
+        
+        if omega_cohesion > MAX_OMEGA {
+            omega_cohesion = MAX_OMEGA;
+        } else if omega_cohesion < -MAX_OMEGA {
+            omega_cohesion = -MAX_OMEGA;
+        }
+        {
+            let tmp = self.velocity[0];
+            self.velocity[0] += omega_cohesion * self.velocity[1];
+            self.velocity[1] -= omega_cohesion * tmp;
+        }
+
+        let mut omega_separation = self.smooth_angle(self.separation) * weight_separation;
+
+        if omega_separation > MAX_OMEGA {
+            omega_separation = MAX_OMEGA;
+        } else if omega_separation < -MAX_OMEGA {
+            omega_separation = -MAX_OMEGA;
+        }
+        {
+            let tmp = self.velocity[0];
+            self.velocity[0] += omega_separation * self.velocity[1];
+            self.velocity[1] -= omega_separation * tmp;
+        }
 
 
-
-
-
-
-
-        let mut  omega_alignement = self.smooth_angle(self.alignment) * WEIGHT_ALIGNMENT;
-        // print!("omega : {}", omega);
-        // // omega += self.avoid_edges();
-        // print!("|  {}", omega);
-        // println!("");
-
-        let tmp = self.velocity[0];
-
+        let mut  omega_alignement = self.smooth_angle(self.alignment) * weight_alignment;
+        
         if omega_alignement > MAX_OMEGA {
             omega_alignement = MAX_OMEGA;
         } else if omega_alignement < -MAX_OMEGA {
             omega_alignement = -MAX_OMEGA;
         }
-
+        
+        let tmp = self.velocity[0];
+        
         self.velocity[0] += omega_alignement * self.velocity[1];
 
         self.velocity[1] -= omega_alignement * tmp;
@@ -271,6 +414,13 @@ impl Boid {
         self.y += self.velocity[1];
         //update the boid's angle
         self.angle = self.velocity[1].atan2(self.velocity[0]);
+
+        if self.velocity[0] == 0.0 && self.velocity[1] == 0.0 {
+            self.unchanged_angle += 1;
+        } else {
+            self.unchanged_angle = 0;
+        }
+        self.dont_be_idiot();
 
     }   
 
@@ -404,6 +554,20 @@ impl Boid {
         // println!("distances: {:?}", self.distance_from_edges);
     }
 
+    fn wrap_around(&mut self) {
+        if self.x > WIDTH {
+            self.x = 0.0;
+        } else if self.x < 0.0 {
+            self.x = WIDTH;
+        }
+
+        if self.y > HEIGHT {
+            self.y = 0.0;
+        } else if self.y < 0.0 {
+            self.y = HEIGHT;
+        }
+    }
+
 
     /**
      * 
@@ -450,9 +614,26 @@ impl Boid {
         omega
     }
 
+    fn dont_be_idiot(&mut self) {
+        if self.unchanged_angle > 2 {
+            //slowlly bring velocity to 0
+            self.velocity[0] *= 0.99;
+            self.velocity[1] *= 0.99;
+            println!("IAM AN IDIOT {} {} {} {} ", self.velocity[0], self.velocity[1], self.unchanged_angle, self.angle);
+        }
+    }
 
-    fn render(&self, gl: &mut GlGraphics, args: &RenderArgs, debug: bool) {
+
+    fn render(&self, gl: &mut GlGraphics, args: &RenderArgs, debug: bool, sim_args : [f64; 6], modes : [bool; 3]) {
         use graphics::*; 
+
+        let weight_cohesion = sim_args[0];
+        let weight_separation = sim_args[1];
+        let weight_alignment = sim_args[2];
+
+        let flock_size = sim_args[3];
+        let separation_radius = sim_args[4];
+        let alignment_radius = sim_args[5];
 
         if debug {
             //draw the radius of the flock around the boid
@@ -461,8 +642,8 @@ impl Boid {
                 let transform = c.transform;
                 let pink = [0.5, 0.0, 0.5, 0.3];
                 let circle = ellipse::Ellipse::new(pink);
-                let center = [self.x - FLOCK_SIZE/2., self.y- FLOCK_SIZE/2.];
-                let radius = FLOCK_SIZE;
+                let center = [self.x - flock_size/2., self.y- flock_size/2.];
+                let radius = flock_size;
                 //ofset the radius to make the circle fit the boid's position
                 circle.draw([center[0], center[1], radius, radius], &c.draw_state, transform, gl);
             });
@@ -473,8 +654,8 @@ impl Boid {
                 let transform = c.transform;
                 let red = [1.0, 0.0, 0.0, 0.3];
                 let circle = ellipse::Ellipse::new(red);
-                let center = [self.x - SEPARATION_RADIUS/2., self.y- SEPARATION_RADIUS/2.];
-                let radius = SEPARATION_RADIUS;
+                let center = [self.x - separation_radius/2., self.y- separation_radius/2.];
+                let radius = separation_radius;
                 //ofset the radius to make the circle fit the boid's position
                 circle.draw([center[0], center[1], radius, radius], &c.draw_state, transform, gl);
             });
@@ -485,8 +666,8 @@ impl Boid {
                 let transform = c.transform;
                 let green = [0.1, 0.2, 0.0, 0.3];
                 let circle = ellipse::Ellipse::new(green);
-                let center = [self.x - ALIGNMENT_RADIUS/2., self.y- ALIGNMENT_RADIUS/2.];
-                let radius = ALIGNMENT_RADIUS;
+                let center = [self.x - alignment_radius/2., self.y- alignment_radius/2.];
+                let radius = alignment_radius;
                 //ofset the radius to make the circle fit the boid's position
                 circle.draw([center[0], center[1], radius, radius], &c.draw_state, transform, gl);
             });
@@ -567,6 +748,16 @@ fn main() {
         boids: LinkedList::new(),
         glyph_cache: glyph_cache,
         debug : false,
+
+        weight_cohesion : WEIGHT_COHESION,
+        weight_separation : WEIGHT_SEPARATION,
+        weight_alignment : WEIGHT_ALIGNMENT,
+
+        radius_cohesion : FLOCK_SIZE,
+        radius_separation : SEPARATION_RADIUS,
+        radius_alignment : ALIGNMENT_RADIUS,
+
+        modes : [false, false, false],
     };
 
     app.init();
@@ -590,6 +781,46 @@ fn main() {
                 Key::D => {
                     app.debug = !app.debug;
                 },
+                Key::NumPad1 => {
+                    app.decrease_value("cohesion".to_string(), 0.1);
+                },
+                Key::NumPad2 => {
+                    app.toggle_mode("cohesion".to_string());
+                },
+                Key::NumPad3 => {
+                    app.increase_value("cohesion".to_string(), 0.1);
+                },
+                Key::NumPad4 => {
+                    app.decrease_value("separation".to_string(), 0.1);
+                },
+                Key::NumPad5 => {
+                    app.toggle_mode("separation".to_string());
+                },
+                Key::NumPad6 => {
+                    app.increase_value("separation".to_string(), 0.1);
+                },
+                Key::NumPad7 => {
+                    app.decrease_value("alignment".to_string(), 0.1);
+                },
+                Key::NumPad8 => {
+                    app.toggle_mode("alignment".to_string());
+                },
+                Key::NumPad9 => {
+                    app.increase_value("alignment".to_string(), 0.1);
+                },
+                Key::I => {
+                    app.print_boids();
+                    app.print()
+                },
+                Key::R => {
+                    app.weight_cohesion = WEIGHT_COHESION;
+                    app.weight_separation = WEIGHT_SEPARATION;
+                    app.weight_alignment = WEIGHT_ALIGNMENT;
+                    app.radius_cohesion = FLOCK_SIZE;
+                    app.radius_separation = SEPARATION_RADIUS;
+                    app.radius_alignment = ALIGNMENT_RADIUS;
+                },
+
                 _ => (),
             }
         }
