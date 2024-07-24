@@ -4,6 +4,7 @@ extern crate glutin_window;
 extern crate opengl_graphics;
 extern crate rand;
 
+use graphics::Transformed;
 use opengl_graphics::TextureSettings;
 use rand::Rng;
 use std::collections::LinkedList;
@@ -13,6 +14,7 @@ use piston::input::*;
 use glutin_window::GlutinWindow;
 use opengl_graphics::{GlGraphics, OpenGL, GlyphCache, Filter};
 use graphics::{color};
+use graphics::Context;
 
 // --------------------------------- CONSTANTS ---------------------------------
 // + Window dimensions +
@@ -28,7 +30,7 @@ const EDGE_DETECTION_DISTANCE: f64 = 50.0;
 // + Boid specific constants +
 const BOID_SIZE: f64 = 10.0; // Size of the boid
 const MAX_BOID_SPEED: f64 = 10.0; // Maximum speed of the boid
-const NB_BOIDS: i32 = 100; // Number of boids to generate
+const NB_BOIDS: i32 = 30; // Number of boids to generate
 
 const MAX_OMEGA : f64 = 0.0; // Maximum angular velocity @BUGGED
 // - Boid specific constants -
@@ -57,7 +59,9 @@ const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
 const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+const WHITE_O_5 : [f32; 4] = [1.0, 1.0, 1.0, 0.2];
 const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+
 // - Color constants -
 
 /**
@@ -69,7 +73,7 @@ struct App {
     glyph_cache: GlyphCache<'static>,   // Font to use for the text
     debug : bool,       // Debug mode (display additional information on the screen)
     weight_cohesion : f64,      // Weight of the cohesion rule defined by the user
-weight_separation : f64,        // Weight of the separation rule defined by the user
+    weight_separation : f64,        // Weight of the separation rule defined by the user
     weight_alignment : f64,     // Weight of the alignment rule defined by the user
 
     radius_cohesion : f64,      // Radius of the cohesion rule defined by the user
@@ -124,32 +128,62 @@ impl App {
             boid.render(&mut self.gl, args, debug, sim_args, self.modes);
         }
 
-        // Draw the text information on the screen
-        self.gl.draw(args.viewport(), |c, gl| {
-            let transform = c.transform.trans(10., 10.);
-            let text = graphics::Text::new_color([1., 1.0, 1.0 ,1.], 11);
-            let str = format!("Cohesion Weight :{} | Separation Weight :{} | Alignment Weight :{}  ", self.weight_cohesion, self.weight_separation, self.weight_alignment);
-            text.draw(
-                &str,
-                &mut self.glyph_cache,
-                &c.draw_state,
-                transform,
-                gl,
-            ).unwrap();
-        });
-        self.gl.draw(args.viewport(), |c, gl| {
-            let transform = c.transform.trans(10., 50.);
-            let mut text = graphics::Text::new_color([1., 1.0, 1.0 ,1.], 11);
-            let str = format!("Cohesion Radius :{} | Separation Radius :{} | Alignment Radius :{}  ", self.radius_cohesion, self.radius_separation, self.radius_alignment);
+        let nb_variables = 6;
+        for i in 0..nb_variables {
+            let mut str = String::new();
+            let mut value = 0.0;
+            let mut is_radius = false;
+            match i {
+                0 => {
+                    str = format!("Cohesion Weight : {:.2}", self.weight_cohesion);
+                    is_radius = !self.modes[0];
+                },
+                2 => {
+                    str = format!("Separation Weight : {:.2}", self.weight_separation);
+                    is_radius = !self.modes[1];
+                },
+                4 => {
+                    str = format!("Alignment Weight : {:.2}", self.weight_alignment);
+                    is_radius = !self.modes[2];
+                },
+                1 => {
+                    str = format!("Cohesion Radius : {:.2}", self.radius_cohesion);
+                    is_radius = self.modes[0];
+                },
+                3 => {
+                    str = format!("Separation Radius : {:.2}", self.radius_separation);
+                    is_radius = self.modes[1];
+                },
+                5 => {
+                    str = format!("Alignment Radius : {:.2}", self.radius_alignment);
+                    is_radius = self.modes[2];
+                },
+                _ => (),
+            }
+            let c = &Context::new_viewport(args.viewport());
+            let posx = if i % 2 == 0 { 10. } else { 150. };
+            let posy = if i % 2 == 0 { 10. + 10. * i as f64 } else { 10. + 10. * (i-1) as f64 };
+            // if variable is a radius draw it in red
+            if is_radius {
+                self.draw_text(&str, posx, posy , WHITE_O_5, &c );
+            } else {
+                self.draw_text( &str, posx, posy, WHITE, &c );
+            }
+        }
+    }
 
-            text.draw(
-                &str,
-                &mut self.glyph_cache,
-                &c.draw_state,
-                transform,
-                gl,
-            ).unwrap();
-        });
+    fn draw_text(&mut self, text: &str, x: f64, y: f64, color : [f32;4], c : &Context) {
+        let transform  : [[f64; 3]; 2] = c.transform.trans(x, y);
+        let mut text_obj = graphics::Text::new_color(color, 11);
+
+        text_obj.draw(
+            text,
+            &mut self.glyph_cache,
+            &c.draw_state,
+            transform,
+            &mut self.gl,
+        ).unwrap();
+        
     }
 
     fn update(&mut self, _args: &UpdateArgs) {
@@ -811,13 +845,13 @@ fn main() {
                 Key::D => {
                     app.debug = !app.debug;
                 },
-                Key::NumPad1 => {
+                Key::NumPad7 => {
                     app.decrease_value("cohesion".to_string(), 0.1);
                 },
-                Key::NumPad2 => {
+                Key::NumPad8 => {
                     app.toggle_mode("cohesion".to_string());
                 },
-                Key::NumPad3 => {
+                Key::NumPad9 => {
                     app.increase_value("cohesion".to_string(), 0.1);
                 },
                 Key::NumPad4 => {
@@ -829,13 +863,13 @@ fn main() {
                 Key::NumPad6 => {
                     app.increase_value("separation".to_string(), 0.1);
                 },
-                Key::NumPad7 => {
+                Key::NumPad1 => {
                     app.decrease_value("alignment".to_string(), 0.1);
                 },
-                Key::NumPad8 => {
+                Key::NumPad2 => {
                     app.toggle_mode("alignment".to_string());
                 },
-                Key::NumPad9 => {
+                Key::NumPad3 => {
                     app.increase_value("alignment".to_string(), 0.1);
                 },
                 Key::I => {
