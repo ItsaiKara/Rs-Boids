@@ -14,68 +14,85 @@ use glutin_window::GlutinWindow;
 use opengl_graphics::{GlGraphics, OpenGL, GlyphCache, Filter};
 use graphics::{color};
 
-const WIDTH: f64 = 1700.0;
+// --------------------------------- CONSTANTS ---------------------------------
+// + Window dimensions +
+const WIDTH: f64 = 1700.0; 
 const HEIGHT: f64 = 800.0;
+const FRAME_RATE: u64 = 24;
+// - Window dimensions -
+
+// + Border avoidance constants +
+const EDGE_DETECTION_DISTANCE: f64 = 50.0;
+// - Border avoidance constants -
+
+// + Boid specific constants +
+const BOID_SIZE: f64 = 10.0; // Size of the boid
+const MAX_BOID_SPEED: f64 = 10.0; // Maximum speed of the boid
+const NB_BOIDS: i32 = 100; // Number of boids to generate
+
+const MAX_OMEGA : f64 = 0.0; // Maximum angular velocity @BUGGED
+// - Boid specific constants -
+
+// + Default boids simulation parameters +
+const FLOCK_SIZE: f64 = 170.; // Radius of the flock (flock is size of the circle around the boid for the cohesion rule)
+const WEIGHT_COHESION: f64 = 0.3; // Weight of the cohesion rule
+
+const SEPARATION_RADIUS: f64 = 20.0; // Radius of the separation rule
+const WEIGHT_SEPARATION: f64 = 0.9; // Weight of the separation rule
+
+const ALIGNMENT_RADIUS: f64 = 200.; // Radius of the alignment rule
+const WEIGHT_ALIGNMENT: f64 = 0.7; // Weight of the alignment rule
+// - Default boids simulation parameters -
+
+// ?? @TODO
+const VELCIRAPTOR_SPEED: f64 = 50.;
 const STEERING_FACTOR: f64 = 5.;
 
-const BOID_SIZE: f64 = 10.0;
-const MAX_BOID_SPEED: f64 = 10.0;
-const NB_BOIDS: i32 = 100;
 
-
-/**
- * The size of the flock (the radius around the boid in which other boids are considered neighbors)
- */
-const FLOCK_SIZE: f64 = 170.;
-const WEIGHT_COHESION: f64 = 0.3;
-
-/**
- * The distance at which the boid will start to avoid colliding with other boids
- */
-const SEPARATION_RADIUS: f64 = 20.0;
-const WEIGHT_SEPARATION: f64 = 0.9;
-
-/**
- * The distance at which the boid will start to align with other boids
- */
-const ALIGNMENT_RADIUS: f64 = 200.;
-const WEIGHT_ALIGNMENT: f64 = 0.7;
-
-const FRAME_RATE: u64 = 24;
-const VELCIRAPTOR_SPEED: f64 = 50.;
-
-const MAX_OMEGA : f64 = 0.0;
-
-const EDGE_DETECTION_DISTANCE: f64 = 50.0;
-
+// Font date to use for the text
 const FONT_DATA: &[u8] = include_bytes!("assets/FiraSans-Regular.ttf");
 
+// + Color constants +
+const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
+const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+// - Color constants -
+
+/**
+ * Root structure of the application
+ */
 struct App {
-    gl: GlGraphics,
-    boids: LinkedList<Boid>,
-    glyph_cache: GlyphCache<'static>,
-    debug : bool,
-    weight_cohesion : f64,
-    weight_separation : f64,
-    weight_alignment : f64,
+    gl: GlGraphics,     // OpenGL drawing backend
+    boids: LinkedList<Boid>,        // List of boids in the simulation
+    glyph_cache: GlyphCache<'static>,   // Font to use for the text
+    debug : bool,       // Debug mode (display additional information on the screen)
+    weight_cohesion : f64,      // Weight of the cohesion rule defined by the user
+weight_separation : f64,        // Weight of the separation rule defined by the user
+    weight_alignment : f64,     // Weight of the alignment rule defined by the user
 
-    radius_cohesion : f64,
-    radius_separation : f64,
-    radius_alignment : f64,
+    radius_cohesion : f64,      // Radius of the cohesion rule defined by the user
+    radius_separation : f64,    // Radius of the separation rule defined by the
+    radius_alignment : f64,     // Radius of the alignment rule defined by the user
 
-    // 0 : cohesion
-    // 1 : separation
-    // 2 : alignment
-    // True if edit weight mode is active
-    // False if edit radius mode is active
+    /**
+     * Modes to toggle between weight and radius (user controls)
+     * 0 : Cohesion
+     * 1 : Separation
+     * 2 : Alignment
+     * True : Weight
+     * False : Radius
+     */
     modes : [bool; 3]
 }
 
+/**
+ * App (or simulation) methods
+ */
 impl App {
     fn render(&mut self, args: &RenderArgs, debug: bool) {
         use graphics::*;
-
-        let BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 
         // Clear the screen
         self.gl.draw(args.viewport(), |_c, gl| {
@@ -85,16 +102,16 @@ impl App {
         //draw blue lines around the edges of the screen
         self.gl.draw(args.viewport(), |c, gl| {
             let transform = c.transform;
-            let blue = [0.0, 0.0, 1.0, 1.0];
-            let line = line::Line::new(blue, 1.0);
-            
+            //Array of vertices for the lines
             let vertices = [
                 [0.0, 0.0, WIDTH, 0.0],
                 [0.0, 0.0, 0.0, HEIGHT],
                 [0.0, HEIGHT, WIDTH, HEIGHT],
                 [WIDTH, 0.0, WIDTH, HEIGHT],
-            ];
-
+                ];
+            // line element
+            let line = line::Line::new(BLUE, 1.0);
+            // Draw the lines
             for v in &vertices {
                 line.draw(*v, &c.draw_state, transform, gl);
             }
@@ -102,16 +119,16 @@ impl App {
 
         //render each boid
         for boid in &self.boids {
-
+            // Simulation arguments for the boids
             let sim_args = [self.weight_cohesion, self.weight_separation, self.weight_alignment, self.radius_cohesion, self.radius_separation, self.radius_alignment];
             boid.render(&mut self.gl, args, debug, sim_args, self.modes);
         }
 
+        // Draw the text information on the screen
         self.gl.draw(args.viewport(), |c, gl| {
             let transform = c.transform.trans(10., 10.);
-            let mut text = graphics::Text::new_color([1., 1.0, 1.0 ,1.], 11);
+            let text = graphics::Text::new_color([1., 1.0, 1.0 ,1.], 11);
             let str = format!("Cohesion Weight :{} | Separation Weight :{} | Alignment Weight :{}  ", self.weight_cohesion, self.weight_separation, self.weight_alignment);
-
             text.draw(
                 &str,
                 &mut self.glyph_cache,
@@ -120,7 +137,6 @@ impl App {
                 gl,
             ).unwrap();
         });
-
         self.gl.draw(args.viewport(), |c, gl| {
             let transform = c.transform.trans(10., 50.);
             let mut text = graphics::Text::new_color([1., 1.0, 1.0 ,1.], 11);
@@ -134,7 +150,6 @@ impl App {
                 gl,
             ).unwrap();
         });
-
     }
 
     fn update(&mut self, _args: &UpdateArgs) {
@@ -144,6 +159,7 @@ impl App {
         // args for simulation update
         let sim_args = [self.weight_cohesion, self.weight_separation, self.weight_alignment, self.radius_cohesion, self.radius_separation, self.radius_alignment];
 
+        //update each boid loop
         for boid in &mut self.boids {
             boid.update(_args, dup_boids.clone(), sim_args, self.modes);
         }
@@ -156,11 +172,13 @@ impl App {
         }
     }
 
+    // Reset the simulation (Not the simulation parameters)
     fn reset(&mut self) {
         self.boids.clear();
         self.load_boids();
     }
 
+    // Load the boids in the simulation (random angles and positions)
     fn load_boids(&mut self) {
         for ct in 0..NB_BOIDS {
             let mut rng = rand::thread_rng();
@@ -172,10 +190,13 @@ impl App {
         }
     }
 
+    // Initialize the simulation
     fn init (&mut self) {
         self.load_boids();
     }
 
+
+    // Print the simulation parameters (for debug)
     fn print(&self) {
         println!("weight_cohesion : {}", self.weight_cohesion);
         println!("weight_separation : {}", self.weight_separation);
@@ -185,6 +206,9 @@ impl App {
         println!("radius_alignment : {}", self.radius_alignment);
     }
 
+    // Increase the value of a simulation parameter (weight or radius)
+    // @str : the parameter to increase (cohesion, separation, alignment)
+    // @value : the value to increase (*10 for radius)
     fn increase_value(&mut self, str : String, value : f64) {
         match str.as_str() {
             "cohesion" => {
@@ -212,6 +236,9 @@ impl App {
         }
     }
 
+    // Decrease the value of a simulation parameter (weight or radius)
+    // @str : the parameter to decrease (cohesion, separation, alignment)
+    // @value : the value to decrease (*10 for radius)
     fn decrease_value(&mut self, str : String, value : f64) {
         match str.as_str() {
             "cohesion" => {
@@ -239,6 +266,9 @@ impl App {
         }
     }
 
+    // Toggle between weight and radius for a simulation parameter
+    // @str : the parameter to toggle (cohesion, separation, alignment)
+    // This method toggle a boolean in the app.modes array
     fn toggle_mode(&mut self, str : String) {
         match str.as_str() {
             "cohesion" => {
